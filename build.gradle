@@ -1,0 +1,68 @@
+buildscript {
+	ext {
+        springBootVersion = '1.5.2.RELEASE'
+        springVaultVersion = '1.0.0.M2'
+        gradleDockerVersion = '0.12.0'
+        swagger2Version = '2.6.1'
+	}
+    repositories {
+        mavenCentral()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath group: 'io.spring.gradle', name: 'dependency-management-plugin', version: "0.5.6.RELEASE"
+        classpath group: 'org.springframework.boot', name: 'spring-boot-gradle-plugin', version: "$springBootVersion"
+        classpath group: 'gradle.plugin.com.palantir.gradle.docker', name: 'gradle-docker', version: "$gradleDockerVersion"
+        classpath group: 'gradle.plugin.com.github.lkishalmi.gradle', name: 'gradle-gatling-plugin', version: "0.4.1"
+    }
+}
+
+group 'com.ihm.boilerplate'
+
+apply plugin: 'java'
+apply plugin: 'scala'
+apply plugin: 'idea'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'jacoco'
+apply plugin: "com.github.lkishalmi.gatling"
+
+jar {
+    baseName = "${artifactName}"
+    version = "${appVersion}"
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+    maven {
+        url("https://repo.spring.io/libs-milestone")
+    }
+}
+
+dependencies {
+    compile('org.springframework.boot:spring-boot-starter-web')
+    compile('org.springframework.boot:spring-boot-starter-amqp')
+    compile('org.springframework.cloud:spring-cloud-starter-eureka')
+    compile('org.springframework.cloud:spring-cloud-starter-hystrix')
+    compile('org.springframework.cloud:spring-cloud-starter-consul-config')
+    compile group: 'org.springframework.vault', name: 'spring-vault-core', version: "$springVaultVersion"
+
+    compile group: 'io.springfox', name: 'springfox-swagger2', version: "$swagger2Version"
+    compile group: 'io.springfox', name: 'springfox-swagger-ui', version: "$swagger2Version"
+
+    compileOnly('org.projectlombok:lombok')
+
+    testCompile("org.mockito:mockito-core:2.+")
+    testCompile('org.springframework.boot:spring-boot-starter-test')
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:Camden.SR5"
+    }
+}

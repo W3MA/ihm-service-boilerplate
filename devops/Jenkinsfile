@@ -1,0 +1,168 @@
+#!/usr/bin/env groovy
+@Library('devops-ihm-shared-lib') _
+
+def projectProperties = [
+    [$class: "BuildDiscarderProperty",strategy: [$class: "LogRotator", numToKeepStr: "5"]],
+    parameters([
+      choice(name: "NODE", choices: "build-slave-linux\nmaster", description: "Build node"),
+      string(name: "ARTIFACT_NAME", defaultValue: "ihm-boilerplate-service", description: "Generated artifact name"),
+      choice(name: "VERSION_INCREMENT", choices: "patch\nminor\nmajor", description: "Version to be incremented in artifact"),
+      choice(name: "S3_REGION", choices: "us-east-1", description: "AWS S3 Region"),
+      string(name: 'S3_BUCKET', defaultValue: 'x1-artifacts', description: 'AWS S3 Bucket to store the artifacts'),
+      string(name: 'S3_DIR', defaultValue: 'boilerplate-service', description: 'The directory structure inside bucket'),
+      string(name: "SLACK_CHANNEL", defaultValue: "#jenkins_slacksend", description: "Slack channel for build notification"),
+      string(name: "DOCKERFILE", defaultValue: "/src/main/docker/Dockerfile", description: "The path to the Dockerfile"),
+      string(name: "AWS_ECR_ADDRESS", defaultValue: "079127473663.dkr.ecr.us-east-1.amazonaws.com/", description: "AWS ECR address to store container images")
+    ])
+]
+properties(projectProperties)
+
+try {
+
+  def jenkinsCredentialId = 'a4ff3aba-c026-421d-a1a7-60a954d3e398'
+
+  def artifactName = ARTIFACT_NAME
+  def dockerfile = DOCKERFILE
+  def s3region = S3_REGION
+  def s3dir = S3_DIR
+  def s3bucket = S3_BUCKET
+  def ecrAddress = AWS_ECR_ADDRESS
+
+  String version
+  String artifactPath
+  String finalArtifactName
+  String workspace
+
+  node("${NODE}") {
+    slackSend channel: "${SLACK_CHANNEL}", message: "Build <${env.BUILD_URL}|#${env.BUILD_NUMBER}> started on *${env.JOB_NAME}* pipeline"
+
+    stage("Clean workspace") {
+      milestone()
+      deleteDir()
+
+      workspace = WORKSPACE
+    }
+
+    stage('Check environment') {
+
+      env.JAVA_HOME="${tool 'java8u112'}"
+      env.PATH="${env.JAVA_HOME}/bin:${env.PATH}"
+      sh "java -version"
+    }
+
+    stage("Checkout project") {
+
+      checkout scm
+    }
+
+    stage("Create tag") {
+
+      version = createTag{
+        Workspace = workspace
+      }
+    }
+
+    stage("Compile project") {
+
+      def compileResult =  compile {
+                            ArtfactName = artifactName
+                            Version = version
+                            Dockerfile = dockerfile
+                            Workspace = workspace
+                          }
+
+      finalArtifactName =  compileResult.finalArtifactName
+      artifactPath = compileResult.artifactPath
+    }
+
+    stage("Test project") {
+
+      testProject {
+        ArtfactName = artifactName
+        Version = version
+        Dockerfile = dockerfile
+      }
+    }
+
+    stage("Publish into s3") {
+
+      milestone()
+
+      publishArtifact{
+        ArtifactPath = artifactPath
+        FinalArtifactName = finalArtifactName
+        Region = s3region
+        Bucket = s3bucket
+        Dir = s3dir
+      }
+
+    }
+
+    stage('Generate Docker image') {
+
+      milestone()
+
+      generateDockerImage {
+        ArtifactName = artifactName
+        Version = version
+        Dockerfile = dockerfile
+      }
+    }
+
+    stage('Publish into ECR') {
+
+      milestone()
+
+      publishECR {
+        ArtifactName = artifactName
+        Version = version
+        EcrAddress = ecrAddress
+        Region = s3region
+        Dir = s3dir
+      }
+    }
+
+    stage('Release tag') {
+
+      releaseTag{
+        JenkinsCredentialId = jenkinsCredentialId
+      }
+    }
+
+    stage('Deploy CI') {
+
+      milestone()
+
+      deployEnv {
+        AppName = 'boilerplate'
+        Version = version
+        EnvironmentName = 'ci'
+        Appk8sFile = './devops/deploy/boilerplate-app-k8s.yaml'
+        Servicek8sFile = './devops/deploy/boilerplate-service-k8s.json'
+      }
+    }
+
+    stage('Acceptance Tests') {
+
+      acceptanceTests{
+        DockerFile = './src/acceptance_tests/Dockerfile'
+      }
+    }
+
+    stage("Perf test") {
+
+      performanceTest{
+        ArtfactName = artifactName
+        Version = version
+        Dockerfile = dockerfile
+      }
+    }
+    slackSend channel: "${SLACK_CHANNEL}", color: "good", message: "Build <${env.BUILD_URL}|#${env.BUILD_NUMBER}> successfull finished on *${env.JOB_NAME}* pipeline"
+  }
+} catch(e) {
+    echo "Fail: ${e}"
+    slackSend channel: "${SLACK_CHANNEL}", color: "danger", message: "Build <${env.BUILD_URL}|#${env.BUILD_NUMBER}> failed on *${env.JOB_NAME}* pipeline"
+    throw e
+} finally {
+
+}
